@@ -9,27 +9,23 @@ use App\Service\Mailer;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
+use Symfony\Component\PasswordHasher\Hasher\UserPasswordHasherInterface;
 use Symfony\Component\Routing\Annotation\Route;
-use Symfony\Component\Security\Core\Encoder\UserPasswordEncoderInterface;
 
 class RegistrationController extends AbstractController
 {
-    private $passwordEncoder;
-    private $mailer;
-    private $userRepository;
+    private Mailer $mailer;
+    private UserRepository $userRepository;
+    private UserPasswordHasherInterface $passwordHasher;
 
-    public function __construct(UserPasswordEncoderInterface $passwordEncoder, Mailer $mailer, UserRepository $userRepository)
+    public function __construct(UserPasswordHasherInterface $passwordHasher, Mailer $mailer, UserRepository $userRepository)
     {
-        $this->passwordEncoder = $passwordEncoder;
         $this->mailer = $mailer;
         $this->userRepository = $userRepository;
+        $this->passwordHasher = $passwordHasher;
     }
 
-    /**
-     * @Route("/inscription", name="register")
-     * @param Request $request
-     * @return Response
-     */
+    #[Route(path: '/inscription', name: 'register')]
     public function register(Request $request): Response
     {
         $user = new User();
@@ -38,12 +34,10 @@ class RegistrationController extends AbstractController
 
         if($form->isSubmitted() && $form->isValid()) {
             $user->setPassword(
-                $this->passwordEncoder->encodePassword($user, $form->get("password")->getData())
+                $this->passwordHasher->hashPassword($user, $form->get("password")->getData())
             );
             $user->setToken($this->generateToken());
-            $em = $this->getDoctrine()->getManager();
-            $em->persist($user);
-            $em->flush();
+            $this->userRepository->save($user, true);
             $this->mailer->sendEmail($user->getEmail(), $user->getToken());
             $this->addFlash("success", "Inscription réussie !");
         }
@@ -53,19 +47,14 @@ class RegistrationController extends AbstractController
         ]);
     }
 
-    /**
-     * @Route("/confirmer-mon-compte/{token}", name="confirm_account")
-     * @param string $token
-     */
+    #[Route(path: '/confirmer-mon-compte/{token}', name: 'confirm_account')]
     public function confirmAccount(string $token)
     {
         $user = $this->userRepository->findOneBy(["token" => $token]);
         if($user) {
             $user->setToken(null);
             $user->setEnabled(true);
-            $em = $this->getDoctrine()->getManager();
-            $em->persist($user);
-            $em->flush();
+            $this->userRepository->save($user, true);
             $this->addFlash("success", "Compte actif !");
             return $this->redirectToRoute("home");
         } else {
